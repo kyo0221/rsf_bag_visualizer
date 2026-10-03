@@ -5,7 +5,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import analysis as A
+from rsf_bag_visualizer import analysis as A
 
 
 def test_rigid_align_recovers_transform():
