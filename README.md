@@ -1,7 +1,7 @@
 # rsf_bag_visualizer
 
 RSF-X001（Hokuyo）の rosbag2 をブラウザで解析する ROS 2 パッケージです。bag を置いたフォルダを launch で指定すると
-一覧ページが開き、bag を選ぶと解析してレポート（軌跡、GNSS/LIO 切替、LIO 生 / RSF 処理 LIO、GNSS、デバイス状態、イベント）を表示します。
+一覧ページが開き、bag を選ぶと解析してレポート（軌跡、GNSS/LIO 切替、LIO 生 / RSF 処理 LIO、yaw 軸、理想切替シミュレーション、GNSS、デバイス状態、イベント）を表示します。
 
 ```bash
 cd ~/rsf_ws && colcon build --packages-select rsf_bag_visualizer --symlink-install && source install/setup.bash
@@ -22,6 +22,8 @@ ros2 launch rsf_bag_visualizer visualizer.launch.py bag_dir:=/path/to/bags
 | rsf_odom（切替） | 色分け軌跡、速度、z、σ、yaw、rsf_odom_type / rsf_odom_state の帯 |
 | LIO 生 | LiDAR レート / IMU レートの軌跡、z、σ、点群点数、GNSS との乖離・方位誤差・距離スケール |
 | RSF 処理 LIO | rsf_odom の LIO 区間と純 LIO の重ね描き、|rsf_odom − 純 LIO|、進行方向差、GNSS との乖離 |
+| 方位 (yaw) | 軌跡上に各時刻の yaw 軸（機体 x 軸）を矢印で表示（表示範囲で約 150 本に間引き）、yaw、yaw − 進行方向 |
+| 理想切替 | 切替ジャンプの無い GNSS/LIO 切替のシミュレーション（RTK Fix を採用、途切れ中は純 LIO の相対移動を積算、復帰で GNSS へ）、Fix 更新ごとの補正量、復帰時の跳びの表 |
 | GNSS | 品質別の生 GNSS 軌跡、UTM odom、gps_qual 帯、衛星数、HDOP、diff_age、σ、高度、GPRMC |
 | 状態 | rsf_odom/fix の type/state、gps_qual、diagnostics、IMU、トピック受信間隔 |
 | イベント・集計 | 要約、クラス別割合、Fix 復帰→odom 復帰の待ち時間、位置合わせ残差、イベント一覧（クリックで前後 ±30 s を表示） |

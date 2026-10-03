@@ -75,7 +75,8 @@ class Jobs:
             return job
         html_path = self.report_path(name)
         meta = os.path.join(self.bag_dir, name, 'metadata.yaml')
-        if os.path.isfile(html_path) and os.path.getmtime(html_path) >= os.path.getmtime(meta):
+        newest = max(os.path.getmtime(f) for f in (meta, analysis.__file__, report.__file__))
+        if os.path.isfile(html_path) and os.path.getmtime(html_path) >= newest:
             return {'state': 'ready', 'log': []}
         return job or {'state': 'none', 'log': []}
 

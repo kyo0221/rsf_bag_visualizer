@@ -50,7 +50,7 @@ h3{font-size:14px;margin:12px 0 4px}
 <script>const D = __DATA__;</script>
 <script>
 const C={grid:'#e1e0d9',surface:'#fcfcfb',ink:'#0b0b0b',ink2:'#52514e',muted:'#898781',blue:'#2a78d6',orange:'#eb6834',aqua:'#1baf7a',violet:'#4a3aa7',red:'#e34948'};
-const TABS=[['overview','概要'],['rsf','rsf_odom（切替）'],['lio_raw','LIO 生'],['lio_rsf','RSF 処理 LIO'],['gnss','GNSS'],['states','状態'],['events','イベント・集計']];
+const TABS=[['overview','概要'],['rsf','rsf_odom（切替）'],['lio_raw','LIO 生'],['lio_rsf','RSF 処理 LIO'],['yaw','方位 (yaw)'],['sim','理想切替'],['gnss','GNSS'],['states','状態'],['events','イベント・集計']];
 const S={t0:0,t1:D.meta.duration_s,align:false,tab:'overview',dirty:{}};
 const HOVER='t=%{customdata:.1f}s<br>x=%{x:.2f} y=%{y:.2f}<extra>%{fullData.name}</extra>';
 function lower(a,v){let lo=0,hi=a.length;while(lo<hi){const m=(lo+hi)>>1;if(a[m]<v)lo=m+1;else hi=m;}return lo;}
@@ -122,6 +122,27 @@ rows.push({title:'rsf_odom と純 LIO の進行方向差 [deg] / 距離スケー
 const g=D.metrics.rsf_odom;if(g){const gg=sl(g.t,g.gap),h=sl(g.hdg_t,g.hdg_err);rows.push({title:'rsf_odom と生 GNSS(Fix) の乖離 [m]',traces:[{name:'gap',t:gg.t,v:gg.v}]});rows.push({title:'rsf_odom と GNSS の進行方向差 [deg]',traces:[{name:'方位誤差',t:h.t,v:h.v}]});}
 rows.push(stripRow('rsf_odom_type',D.strips.odom_type,stateColor),stripRow('rsf_odom_state',D.strips.odom_state,stateColor));
 return [{id:'lr_xy',title:'RSF 処理 LIO（rsf_odom の LIO 区間）と純 LIO（出力そのまま）',fig:{data:tr,layout:xyLayout(null,640)}},{id:'lr_ts',fig:tsFigure(rows)}];}
+function span(a){let lo=Infinity,hi=-Infinity;for(const v of a){if(v===null)continue;if(v<lo)lo=v;if(v>hi)hi=v;}return hi-lo;}
+function yawPanel(id,src,name,color,rot,extra){const p=pts(src),[i,j]=range(src),yaw=src.yaw.slice(i,j),len=0.05*Math.max(span(p.x),span(p.y))||1,step=Math.ceil(p.x.length/60),x=[],y=[],cd=[],size=[],ang=[];
+for(let k=0;k<p.x.length;k+=step){if(yaw[k]===null)continue;const w=yaw[k]+rot,a=w*Math.PI/180;x.push(p.x[k],p.x[k]+len*Math.cos(a),null);y.push(p.y[k],p.y[k]+len*Math.sin(a),null);cd.push([p.t[k],w],[p.t[k],w],[null,null]);size.push(0,9,0);ang.push(0,90-w,0);}
+const tr=[trackTrace(src,name,C.muted,'solid',1.5),{type:'scatter',mode:'lines+markers',name:'yaw 軸',x,y,customdata:cd,line:{color,width:2},marker:{symbol:'arrow',size,angle:ang,color},connectgaps:false,hovertemplate:'t=%{customdata[0]:.1f}s yaw=%{customdata[1]:.1f}°<extra></extra>'},...extra];
+return {id,title:`${name}: yaw 軸（矢印 = 各時刻の機体 x 軸の向き, 表示範囲で約 60 本に間引き）`,fig:{data:tr,layout:xyLayout(null,520)}};}
+function tabYaw(){const rotOf=k=>S.align&&D.align[k]?D.align[k].rot_deg:0,out=[yawPanel('yaw_rsf',D.sources.rsf_odom,'rsf_odom',C.ink,0,[jumpTrace(),transitionTrace()])];
+if(D.sources.lio_lidar)out.push(yawPanel('yaw_lio',D.sources.lio_lidar,S.align?'LIO 生 (LiDAR レート, GNSS 基準に位置合わせ)':'LIO 生 (LiDAR レート, 出力そのまま)',C.aqua,rotOf('lio_lidar'),[]));
+const wrap=v=>((v+540)%360)-180,yaws=[],diffs=[];
+for(const [k,name,color] of [['rsf_odom','rsf_odom',C.ink],['lio_lidar','LIO 生 (LiDAR レート)',C.aqua],['lio_imu','LIO 生 (IMU レート)',C.orange]]){const src=D.sources[k];if(!src)continue;const [i,j]=range(src),t=src.t.slice(i,j),yaw=src.yaw.slice(i,j),cr=src.course.slice(i,j),r=k==='rsf_odom'?0:rotOf(k);
+yaws.push({name,t,v:yaw.map(v=>v===null?null:wrap(v+r)),color,legend:true});diffs.push({name,t,v:yaw.map((v,q)=>v===null||cr[q]===null?null:wrap(v-cr[q])),color});}
+out.push({id:'yaw_ts',fig:tsFigure([{title:'yaw [deg]'+(S.align?'（LIO は位置合わせの回転を加算）':''),traces:yaws},{title:'yaw − 進行方向 [deg]（1 s 間の移動方向との差, 移動 0.3 m 未満は除外）',traces:diffs}])});return out;}
+function tabSim(){const s=D.sim;if(!s)return [{id:'sim_none',html:'<p>GNSS (RTK Fix) と LIO (LiDAR レート) の両方が必要です</p>'}];
+const [i,j]=range(s),seg=m=>({type:'scattergl',mode:'lines',name:m?'理想切替: Fix 途切れ中（純 LIO の相対移動を積算）':'理想切替: GNSS Fix 区間',x:s.x.slice(i,j).map((v,k)=>s.mode[i+k]===m?v:null),y:s.y.slice(i,j).map((v,k)=>s.mode[i+k]===m?v:null),customdata:s.t.slice(i,j),line:{color:m?C.aqua:C.blue,width:2.5},connectgaps:false,hovertemplate:HOVER});
+const J=s.jumps.filter(e=>e.t>=S.t0&&e.t<=S.t1),x=[],y=[],txt=[];for(const e of J){const h=`復帰 ${e.t}s: 跳び ${e.jump_m} m（途切れ ${e.outage_s} s, 走行 ${e.travel_m} m）`;x.push(e.x0,e.x1,null);y.push(e.y0,e.y1,null);txt.push(h,h,'');}
+const tr=[trackTrace(D.sources.rsf_odom,'rsf_odom（デバイス出力, 切替ジャンプあり）',C.orange,'solid',1.5,true),...gnssTraces(false),seg(0),seg(1),{type:'scatter',mode:'lines+markers',name:'復帰時の跳び',x,y,text:txt,line:{color:C.ink,width:1.5,dash:'dash'},marker:{color:C.ink,size:7},connectgaps:false,hovertemplate:'%{text}<extra></extra>'}];
+const rows=[],g=D.metrics.rsf_odom;if(g){const gg=sl(g.t,g.gap);rows.push({title:'|rsf_odom − RTK Fix| [m]（デバイス出力）',traces:[{name:'rsf_odom',t:gg.t,v:gg.v,color:C.orange}]});}
+const c=sl(s.corr_t,s.corr);rows.push({title:'理想切替: Fix 更新ごとの補正量 [m]（復帰時の値 = 跳び幅）',traces:[{name:'補正量',t:c.t,v:c.v}]},stripRow('Fix 途切れ（2 s 超）',s.jumps.map(e=>[e.t-e.outage_s,e.t,'途切れ']),()=>C.aqua));
+const tbl=J.map(e=>`<tr class="ev" data-t="${e.t}"><td>${e.t}</td><td>${e.outage_s}</td><td>${e.travel_m}</td><td>${e.jump_m}</td><td>${(e.jump_m/Math.max(e.travel_m,1)*100).toFixed(1)}</td></tr>`).join('');
+return [{id:'sim_xy',title:'切替ジャンプを除いた理想的な GNSS/LIO 切替（RTK Fix を採用、途切れ中は純 LIO の相対移動を積算、復帰で GNSS 座標へ）',fig:{data:tr,layout:xyLayout(null,640)}},{id:'sim_ts',fig:tsFigure(rows)},
+{id:'sim_tbl',html:`<div class="tiles"><div class="tile"><div class="k">Fix 継続中の毎更新補正 中央値 / 95%</div><div class="v">${s.routine_median_m} / ${s.routine_p95_m} m</div></div><div class="tile"><div class="k">Fix 途切れ（2 s 超）</div><div class="v">${s.jumps.length} 回</div></div></div>
+<h3>Fix 復帰時の跳び（行クリックで前後 ±30 s を表示）</h3><table><tr><th>復帰 t [s]</th><th>途切れ [s]</th><th>途切れ中の走行 [m]</th><th>跳び [m]</th><th>跳び / 走行 [%]</th></tr>${tbl||'<tr><td colspan="5">該当なし</td></tr>'}</table>`}];}
 function tabGnss(){const tr=gnssTraces(true);if(D.sources.utm)tr.push(trackTrace(D.sources.utm,'UTM odom',C.muted,'dash',1.5,true));
 const rows=[],g=D.series.gps;
 if(g){rows.push(stripRow('GPGGA gps_qual',D.strips.gps_qual,stateColor));const sats=sl(g.t,g.sats),h=sl(g.t,g.hdop),age=sl(g.t,g.diff_age);
@@ -151,12 +172,12 @@ return [{id:'ev_html',html:`<div class="tiles">${tileHtml}</div>
 <h3>GNSS Fix 復帰 → odom が GNSS に戻るまで</h3><table><tr><th>Fix 復帰 [s]</th><th>GNSS へ復帰 [s]</th><th>待ち時間</th></tr>${ep||'<tr><td colspan="3">該当なし</td></tr>'}</table>
 <h3>座標系の位置合わせ</h3><table><tr><th>対象</th><th>基準</th><th>n</th><th>残差 rms [m]</th><th>回転 [deg]</th></tr>${al}</table>
 <h3>イベント（行クリックで前後 ±30 s を概要に表示）</h3><table><tr><th>t [s]</th><th>種別</th><th>内容</th></tr>${ev}</table>`}];}
-const BUILD={overview:tabOverview,rsf:tabRsf,lio_raw:tabLioRaw,lio_rsf:tabLioRsf,gnss:tabGnss,states:tabStates,events:tabEvents};
+const BUILD={overview:tabOverview,rsf:tabRsf,lio_raw:tabLioRaw,lio_rsf:tabLioRsf,yaw:tabYaw,sim:tabSim,gnss:tabGnss,states:tabStates,events:tabEvents};
 function render(tab){const panel=document.getElementById('panel_'+tab);panel.innerHTML='';
 for(const item of BUILD[tab]()){const div=document.createElement('div');div.id=item.id;if(item.html){div.className='htmlpanel';div.innerHTML=item.html;}
 if(item.title){const h=document.createElement('div');h.className='ptitle';h.textContent=item.title;div.appendChild(h);}
 const plot=document.createElement('div');div.appendChild(plot);panel.appendChild(div);if(item.fig)Plotly.newPlot(plot,item.fig.data,item.fig.layout,{responsive:true,displaylogo:false});}
-panel.querySelectorAll('tr.ev').forEach(tr=>tr.onclick=()=>{const t=+tr.dataset.t;setRange(Math.max(0,t-30),Math.min(D.meta.duration_s,t+30));show('overview');});
+panel.querySelectorAll('tr.ev').forEach(tr=>tr.onclick=()=>{const t=+tr.dataset.t;setRange(Math.max(0,t-30),Math.min(D.meta.duration_s,t+30));if(tab==='events')show('overview');});
 S.dirty[tab]=false;}
 function show(tab){S.tab=tab;history.replaceState(null,'','#'+tab);
 document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===tab));

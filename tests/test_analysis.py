@@ -69,3 +69,22 @@ def test_find_roles_defaults():
     assert roles['lio_imu'] == '/rsf/lio_imu_rate_odom' and roles['utm'] == '/rsf/utm_coord_odom'
     assert roles['navsat'] == '/rsf/nav_sat_fix' and roles['rsf_fix'] == '/rsf/rsf_fix'
     assert roles['odom_type'] == '/rsf/rsf_odom_type' and roles['diag'] == '/rsf/diagnostics'
+
+
+def test_course_deg_direction_and_stationary():
+    t = np.linspace(0, 20, 201)
+    c = A.course_deg(t, t * 1.0, t * 1.0)
+    assert np.allclose(c[20:], 45.0) and np.isnan(A.course_deg(t, np.zeros_like(t), np.zeros_like(t))).all()
+
+
+def test_simulate_switch_jump_equals_lio_error():
+    lt = np.linspace(0, 100, 2001)
+    lx, ly = lt * 1.0, np.zeros_like(lt)
+    nt = np.arange(0, 100, 0.1)
+    G = np.c_[nt * 1.0, np.full_like(nt, 5.0)]
+    fix = ~((nt > 40) & (nt < 60))
+    lx = lx + np.where(lt > 40, 0.1 * np.minimum(lt - 40, 20), 0.0)
+    sim, mode, ct, corr, jumps, routine = A.simulate_switch(lt, lx, ly, nt, G, fix)
+    assert len(jumps) == 1 and abs(jumps[0]['jump_m'] - 2.0) < 0.15 and abs(jumps[0]['outage_s'] - 20.0) < 0.2
+    assert mode[np.searchsorted(lt, 50.0)] == 1 and mode[np.searchsorted(lt, 20.0)] == 0
+    assert np.nanmax(np.abs(sim[lt < 40, 1] - 5.0)) < 1e-6 and np.median(routine) < 0.01

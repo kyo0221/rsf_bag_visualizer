@@ -64,6 +64,37 @@ def decimate_idx(t, rate):
     return idx if idx[-1] == len(t) - 1 else np.r_[idx, len(t) - 1]
 
 
+def course_deg(t, x, y, lag=1.0, min_move=0.3):
+    dx = x - np.interp(t - lag, t, x)
+    dy = y - np.interp(t - lag, t, y)
+    c = np.degrees(np.arctan2(dy, dx))
+    c[np.hypot(dx, dy) < min_move] = np.nan
+    return c
+
+
+def simulate_switch(lt, lx, ly, nt, G, fix, win=60.0, min_move=8.0, outage_s=2.0):
+    te, GF = nt[fix], G[fix]
+    LF = np.c_[np.interp(te, lt, lx), np.interp(te, lt, ly)]
+    R = [rigid_align(LF, GF)[0]]
+    for k in range(1, len(te)):
+        sel = (te > te[k] - win) & (te <= te[k])
+        R.append(rigid_align(LF[sel], GF[sel])[0] if sel.sum() >= 5 and np.hypot(*(GF[sel][-1] - GF[sel][0])) >= min_move else R[-1])
+    R = np.array(R)
+    k = np.clip(np.searchsorted(te, lt, side='right') - 1, 0, None)
+    sim = GF[k] + np.einsum('nij,nj->ni', R[k], np.c_[lx, ly] - LF[k])
+    sim[lt < te[0]] = np.nan
+    mode = np.where(lt < te[0], -1, (lt - te[k] > 1.5).astype(int))
+    pred = GF[:-1] + np.einsum('nij,nj->ni', R[:-1], LF[1:] - LF[:-1])
+    corr = np.hypot(*(GF[1:] - pred).T)
+    dt = np.diff(te)
+    cum = np.r_[0.0, np.cumsum(np.hypot(np.diff(lx), np.diff(ly)))]
+    jumps = [{'t': round(float(te[i + 1]), 1), 'outage_s': round(float(dt[i]), 1), 'jump_m': round(float(corr[i]), 2),
+              'travel_m': round(float(np.interp(te[i + 1], lt, cum) - np.interp(te[i], lt, cum)), 1),
+              'x0': round(float(pred[i, 0]), 3), 'y0': round(float(pred[i, 1]), 3),
+              'x1': round(float(GF[i + 1, 0]), 3), 'y1': round(float(GF[i + 1, 1]), 3)} for i in np.flatnonzero(dt > outage_s)]
+    return sim, mode, te[1:], corr, jumps, corr[dt <= outage_s]
+
+
 def heading_windows(t, x, y, tg, xg, yg, win=10.0, min_move=2.0):
     out = [[], [], []]
     xi = np.interp(tg, t, x)
@@ -140,7 +171,7 @@ def build(data, side, plot_rate=10.0):
                        'roles': roles, 'stored': side['stored'], 'frames': side.get('frames', {}),
                        'gaps': side.get('gaps', {}), 'jump_thresh': JUMP_THRESH_M, 'align_window': ALIGN_WINDOW_S},
               'sources': {}, 'rsf': {}, 'series': {}, 'strips': {}, 'metrics': {}, 'events': [], 'summary': {},
-              'align': {}}
+              'align': {}, 'sim': None}
     events = report['events']
     strings = side.get('strings', {})
 
@@ -205,7 +236,7 @@ def build(data, side, plot_rate=10.0):
         return idx
 
     idx_r = add_source('rsf_odom', roles['rsf_odom'], roles['rsf_odom'], '#0b0b0b', 'solid',
-                       extra={'speed': speed, 'sx': sx, 'sy': sy, 'yaw': np.degrees(yaw)})
+                       extra={'speed': speed, 'sx': sx, 'sy': sy, 'yaw': np.degrees(yaw), 'course': course_deg(t, x, y)})
     report['rsf'] = {'cls': [int(v) for v in cls[idx_r]], 'cls_labels': CLASS_LABEL, 'cls_colors': CLASS_COLOR,
                      'jumps': [{'t': round(float(t[i + 1]), 2), 'x0': round(float(x[i]), 3), 'y0': round(float(y[i]), 3),
                                 'x1': round(float(x[i + 1]), 3), 'y1': round(float(y[i + 1]), 3),
@@ -300,7 +331,7 @@ def build(data, side, plot_rate=10.0):
     for key, dash in (('lio_lidar', 'solid'), ('lio_imu', 'dot')):
         if not roles[key]:
             continue
-        lt, lx, ly, lz, lsx, lsy, lsz = cols(data, side, roles[key], 't', 'x', 'y', 'z', 'sx', 'sy', 'sz')
+        lt, lx, ly, lz, lyaw, lsx, lsy, lsz = cols(data, side, roles[key], 't', 'x', 'y', 'z', 'yaw', 'sx', 'sy', 'sz')
         xa = ya = None
         if gnss is not None:
             nt, G = gnss['t'], gnss['G']
@@ -321,7 +352,8 @@ def build(data, side, plot_rate=10.0):
                 cum = np.r_[0, np.cumsum(np.hypot(np.diff(lx), np.diff(ly)))]
                 metrics[key] = {'t': rounded(nt[mask], 1), 'gap': rounded(gap[mask], 2), 'dist': rounded(np.interp(nt[mask], lt, cum), 1),
                                 'hdg_t': rounded(ht, 1), 'hdg_err': rounded(dh, 1), 'scale': rounded(ratio)}
-        add_source(key, roles[key], roles[key], INK2, dash, xa, ya, extra={'sx': lsx, 'sy': lsy, 'sz': lsz})
+        add_source(key, roles[key], roles[key], INK2, dash, xa, ya,
+                   extra={'sx': lsx, 'sy': lsy, 'sz': lsz, 'yaw': np.degrees(lyaw), 'course': course_deg(lt, lx, ly)})
 
     if gnss is not None:
         nt, G, mask = gnss['t'], gnss['G'], gnss['fix']
@@ -337,6 +369,12 @@ def build(data, side, plot_rate=10.0):
         lio_mode = is_lio[np.clip(np.searchsorted(t, lt), 0, len(t) - 1)]
         metrics['rsf_vs_lio'] = {'t': rounded(lt[idx], 1), 'offset': rounded(offset[idx], 2), 'lio_mode': [int(v) for v in lio_mode[idx]],
                                  'hdg_t': rounded(ht, 1), 'hdg_diff': rounded(dh, 1), 'scale': rounded(ratio)}
+        if gnss is not None and gnss['fix'].sum() >= 20:
+            sim, mode, ct, corr, jumps, routine = simulate_switch(lt, lx, ly, gnss['t'], gnss['G'], gnss['fix'])
+            report['sim'] = {'t': rounded(lt[idx], 2), 'x': rounded(sim[idx, 0]), 'y': rounded(sim[idx, 1]), 'mode': [int(v) for v in mode[idx]],
+                             'corr_t': rounded(ct, 1), 'corr': rounded(corr, 2), 'jumps': jumps,
+                             'routine_median_m': round(float(np.median(routine)), 3) if len(routine) else None,
+                             'routine_p95_m': round(float(np.percentile(routine, 95)), 3) if len(routine) else None}
     report['metrics'] = metrics
 
     series = report['series']
