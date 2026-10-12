@@ -7,6 +7,7 @@
   <maintainer email="s23c1036dv@chibatech.ac.jp">kyo</maintainer>
   <license>MIT</license>
   <exec_depend>ros2launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
   <exec_depend>rosbag2_py</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>nav_msgs</exec_depend>

@@ -3,6 +3,7 @@ import hashlib
 import html
 import json
 import os
+import sys
 import threading
 import time
 import webbrowser
@@ -10,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 import yaml
+from rclpy.utilities import remove_ros_args
 
 from . import analysis, extract, report
 
@@ -162,7 +164,7 @@ def main():
     ap.add_argument('--cache-dir', default=os.path.expanduser('~/.cache/rsf_bag_visualizer'))
     ap.add_argument('--port', type=int, default=8765)
     ap.add_argument('--open-browser', default='true')
-    a = ap.parse_args()
+    a = ap.parse_args(remove_ros_args(sys.argv)[1:])
     bag_dir = os.path.abspath(os.path.expanduser(a.bag_dir))
     os.makedirs(bag_dir, exist_ok=True)
     server = ThreadingHTTPServer(('127.0.0.1', a.port), make_handler(Jobs(bag_dir, a.cache_dir)))
